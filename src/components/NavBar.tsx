@@ -31,8 +31,10 @@ export default function NavBar({ rol, nombre }: Props) {
         {rol && (
           <nav className="flex items-center gap-1 text-sm">
             <NavLink href="/nuevo">Reportar ingreso</NavLink>
+            <NavLink href="/mis-ingresos">Mis ingresos</NavLink>
             {rol === "admin" && (
               <>
+                <NavLink href="/ingresos">Ingresos</NavLink>
                 <NavLink href="/conciliacion">Conciliación</NavLink>
                 <NavLink href="/tasas">Tasas BCV</NavLink>
                 <NavLink href="/usuarios">Usuarios</NavLink>

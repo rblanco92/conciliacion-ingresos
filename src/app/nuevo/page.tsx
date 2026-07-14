@@ -123,12 +123,20 @@ export default function NuevoIngreso() {
           Quedó registrado y a la espera de conciliación con el banco.
           {moneda === "VES" && " Si aún no hay tasa BCV del día, se convertirá al cargarla."}
         </p>
-        <button
-          onClick={() => setEstado("idle")}
-          className="mt-5 rounded-lg bg-tg-orange px-5 py-2.5 font-bold text-tg-black"
-        >
-          Reportar otro ingreso
-        </button>
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
+          <button
+            onClick={() => setEstado("idle")}
+            className="rounded-lg bg-tg-orange px-5 py-2.5 font-bold text-tg-black"
+          >
+            Reportar otro ingreso
+          </button>
+          <a
+            href="/mis-ingresos"
+            className="rounded-lg border-[1.5px] border-neutral-300 px-5 py-2.5 font-bold text-neutral-700"
+          >
+            Ver mis ingresos
+          </a>
+        </div>
       </div>
     );
   }
