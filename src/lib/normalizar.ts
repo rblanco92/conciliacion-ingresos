@@ -79,56 +79,69 @@ function norm(s: string): string {
 }
 
 // --------------------------------------------------------------------------
-// Parser BNC (por posicion de columna)
+// Parser BNC (detección dinámica de columnas por encabezado)
 // --------------------------------------------------------------------------
-// Estructura confirmada del export BNC:
-//   col 1  = Fecha (dd/mm/yyyy)
-//   col 6  = Tipo Operacion (Abono / Cargo / Comision...)
-//   col 7  = Descripcion
-//   col 12 = Referencia
-//   col 13 = Debe   (egreso)
-//   col 15 = Haber  (ingreso)
-//   col 16 = Saldo
-// La ultima fila es "Totales" (col 1 = "Totales") y se descarta.
+// El BNC exporta distintos reportes (estado de cuenta mensual, últimas 25,
+// etc.) y las columnas caen en POSICIONES DISTINTAS según el reporte. Por eso
+// NO fijamos posiciones: buscamos la fila de encabezados (la que tiene Fecha,
+// Referencia y Haber) y de ahí leemos el índice real de cada columna.
+// Estructura común: Fecha, Descripción, Referencia, Debe (egreso),
+// Haber (ingreso), Saldo. La última fila suele ser "Totales" y se descarta.
 
-const BNC = { fecha: 1, tipo: 6, desc: 7, ref: 12, debe: 13, haber: 15, saldo: 16 };
-
-function esFormatoBNC(rows: Fila[]): number {
-  for (let i = 0; i < Math.min(rows.length, 40); i++) {
-    const r = rows[i] || [];
-    if (
-      norm(String(r[BNC.fecha] ?? "")) === "fecha" &&
-      norm(String(r[BNC.ref] ?? "")).includes("referencia") &&
-      norm(String(r[BNC.haber] ?? "")).includes("haber")
-    ) {
-      return i;
-    }
-  }
-  return -1;
+interface MapaBNC {
+  fila: number;
+  fecha: number;
+  desc: number;
+  ref: number;
+  debe: number;
+  haber: number;
+  saldo: number;
 }
 
-function parseBNC(rows: Fila[], filaEncabezados: number): MovimientoNormalizado[] {
-  const out: MovimientoNormalizado[] = [];
-  for (let i = filaEncabezados + 1; i < rows.length; i++) {
+function detectarBNC(rows: Fila[]): MapaBNC | null {
+  for (let i = 0; i < Math.min(rows.length, 40); i++) {
     const r = rows[i] || [];
-    const celdaFecha = String(r[BNC.fecha] ?? "").trim();
+    const idx: Record<string, number> = {};
+    r.forEach((c, ci) => {
+      const n = norm(String(c ?? ""));
+      if (n && idx[n] === undefined) idx[n] = ci;
+    });
+    // Firma del BNC: tiene Fecha, Referencia y Haber en la misma fila
+    if (idx["fecha"] != null && idx["referencia"] != null && idx["haber"] != null) {
+      return {
+        fila: i,
+        fecha: idx["fecha"],
+        desc: idx["descripcion"] ?? -1,
+        ref: idx["referencia"],
+        debe: idx["debe"] ?? -1,
+        haber: idx["haber"],
+        saldo: idx["saldo"] ?? -1,
+      };
+    }
+  }
+  return null;
+}
+
+function cel(r: Fila, i: number): unknown {
+  return i >= 0 ? r[i] : undefined;
+}
+
+function parseBNC(rows: Fila[], m: MapaBNC): MovimientoNormalizado[] {
+  const out: MovimientoNormalizado[] = [];
+  for (let i = m.fila + 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const celdaFecha = String(cel(r, m.fecha) ?? "").trim();
     if (norm(celdaFecha) === "totales") break;
     if (!celdaFecha) continue;
-    const fecha = fechaISO(r[BNC.fecha]);
+    const fecha = fechaISO(cel(r, m.fecha));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) continue;
-    const haber = numDirecto(r[BNC.haber]);
-    const debe = numDirecto(r[BNC.debe]);
     out.push({
       fecha,
-      referencia: limpiarRef(r[BNC.ref]),
-      descripcion:
-        [r[BNC.tipo], r[BNC.desc]]
-          .map((x) => String(x ?? "").trim())
-          .filter(Boolean)
-          .join(" - ") || null,
-      ingreso: haber,
-      egreso: debe,
-      saldo: r[BNC.saldo] != null ? numDirecto(r[BNC.saldo]) : null,
+      referencia: limpiarRef(cel(r, m.ref)),
+      descripcion: String(cel(r, m.desc) ?? "").trim() || null,
+      ingreso: numDirecto(cel(r, m.haber)),
+      egreso: numDirecto(cel(r, m.debe)),
+      saldo: cel(r, m.saldo) != null ? numDirecto(cel(r, m.saldo)) : null,
     });
   }
   return out;
@@ -175,10 +188,12 @@ function parseGenerico(filas: Record<string, unknown>[]): MovimientoNormalizado[
 // --------------------------------------------------------------------------
 
 export function normalizarBanco(rowsCrudas: Fila[]): MovimientoNormalizado[] {
-  const filaEnc = esFormatoBNC(rowsCrudas);
-  if (filaEnc >= 0) {
-    return parseBNC(rowsCrudas, filaEnc);
+  // 1) Intentar BNC (detección dinámica de columnas por encabezado)
+  const mapa = detectarBNC(rowsCrudas);
+  if (mapa) {
+    return parseBNC(rowsCrudas, mapa);
   }
+  // 2) Genérico: reconstruir objetos usando la primera fila no vacía como header
   let headerIdx = rowsCrudas.findIndex(
     (r) => Array.isArray(r) && r.some((c) => String(c ?? "").trim())
   );
