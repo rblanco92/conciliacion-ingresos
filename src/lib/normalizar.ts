@@ -1,8 +1,16 @@
 // ============================================================================
 // Normalizador de exports bancarios.
-// Cada banco exporta con columnas distintas. Aquí se mapea cada formato a la
-// estructura común { fecha, referencia, descripcion, ingreso, egreso, saldo }.
-// Para agregar un banco nuevo, se añade una entrada a MAPEOS.
+// Convierte el archivo que descarga la admin a la estructura comun que el
+// motor de conciliacion entiende.
+//
+// Soporta:
+//  * BNC (formato real: encabezados en fila ~15, columnas por posicion,
+//    Debe/Haber, fila de Totales al final, referencia con .0).
+//  * Generico: archivos con encabezados por nombre (Fecha, Referencia,
+//    Ingreso/Haber, Egreso/Debe, Saldo).
+//
+// La deteccion es automatica: si encuentra la firma del BNC, usa ese parser;
+// si no, cae al generico.
 // ============================================================================
 
 export interface MovimientoNormalizado {
@@ -14,18 +22,50 @@ export interface MovimientoNormalizado {
   saldo: number | null;
 }
 
-type Fila = Record<string, unknown>;
+type Fila = unknown[];
 
-// Busca una columna por posibles nombres (case-insensitive, sin acentos)
-function col(fila: Fila, nombres: string[]): unknown {
-  const keys = Object.keys(fila);
-  for (const n of nombres) {
-    const key = keys.find(
-      (k) => norm(k) === norm(n) || norm(k).includes(norm(n))
-    );
-    if (key) return fila[key];
+// --------------------------------------------------------------------------
+// Utilidades de formato
+// --------------------------------------------------------------------------
+
+function num(v: unknown): number {
+  if (v == null || v === "") return 0;
+  if (typeof v === "number") return v;
+  const s = String(v).replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "");
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function numDirecto(v: unknown): number {
+  if (v == null || v === "") return 0;
+  if (typeof v === "number") return v;
+  const n = Number(String(v).replace(/[^\d.-]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+function fechaISO(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "number") {
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return d.toISOString().slice(0, 10);
   }
-  return undefined;
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    const yr = y.length === 2 ? "20" + y : y;
+    return `${yr}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return s;
+}
+
+function limpiarRef(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  let s = String(v).trim();
+  s = s.replace(/\.0+$/, "");
+  if (!s || s === "0") return null;
+  return s;
 }
 
 function norm(s: string): string {
@@ -34,65 +74,131 @@ function norm(s: string): string {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-function num(v: unknown): number {
-  if (v == null || v === "") return 0;
-  if (typeof v === "number") return v;
-  // Formato venezolano: 9.425,24 -> 9425.24
-  const s = String(v).replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "");
-  const n = Number(s);
-  return isNaN(n) ? 0 : n;
+// --------------------------------------------------------------------------
+// Parser BNC (por posicion de columna)
+// --------------------------------------------------------------------------
+// Estructura confirmada del export BNC:
+//   col 1  = Fecha (dd/mm/yyyy)
+//   col 6  = Tipo Operacion (Abono / Cargo / Comision...)
+//   col 7  = Descripcion
+//   col 12 = Referencia
+//   col 13 = Debe   (egreso)
+//   col 15 = Haber  (ingreso)
+//   col 16 = Saldo
+// La ultima fila es "Totales" (col 1 = "Totales") y se descarta.
+
+const BNC = { fecha: 1, tipo: 6, desc: 7, ref: 12, debe: 13, haber: 15, saldo: 16 };
+
+function esFormatoBNC(rows: Fila[]): number {
+  for (let i = 0; i < Math.min(rows.length, 40); i++) {
+    const r = rows[i] || [];
+    if (
+      norm(String(r[BNC.fecha] ?? "")) === "fecha" &&
+      norm(String(r[BNC.ref] ?? "")).includes("referencia") &&
+      norm(String(r[BNC.haber] ?? "")).includes("haber")
+    ) {
+      return i;
+    }
+  }
+  return -1;
 }
 
-function fecha(v: unknown): string {
-  if (v == null) return "";
-  // Fecha serial de Excel
-  if (typeof v === "number") {
-    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-    return d.toISOString().slice(0, 10);
-  }
-  const s = String(v).trim();
-  // dd/mm/yyyy o d/m/yyyy
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
-  if (m) {
-    const [, d, mo, y] = m;
-    const yr = y.length === 2 ? "20" + y : y;
-    return `${yr}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-  // yyyy-mm-dd ya normalizado
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  return s;
-}
-
-// Mapeo genérico: sirve para la estructura del libro de la imagen (BNC Taller)
-// y para exports estándar. Usa nombres de columna flexibles.
-export function normalizarFilas(filas: Fila[]): MovimientoNormalizado[] {
+function parseBNC(rows: Fila[], filaEncabezados: number): MovimientoNormalizado[] {
   const out: MovimientoNormalizado[] = [];
+  for (let i = filaEncabezados + 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const celdaFecha = String(r[BNC.fecha] ?? "").trim();
+    if (norm(celdaFecha) === "totales") break;
+    if (!celdaFecha) continue;
+    const fecha = fechaISO(r[BNC.fecha]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) continue;
+    const haber = numDirecto(r[BNC.haber]);
+    const debe = numDirecto(r[BNC.debe]);
+    out.push({
+      fecha,
+      referencia: limpiarRef(r[BNC.ref]),
+      descripcion:
+        [r[BNC.tipo], r[BNC.desc]]
+          .map((x) => String(x ?? "").trim())
+          .filter(Boolean)
+          .join(" - ") || null,
+      ingreso: haber,
+      egreso: debe,
+      saldo: r[BNC.saldo] != null ? numDirecto(r[BNC.saldo]) : null,
+    });
+  }
+  return out;
+}
 
+// --------------------------------------------------------------------------
+// Parser generico (por nombre de columna)
+// --------------------------------------------------------------------------
+
+function col(fila: Record<string, unknown>, nombres: string[]): unknown {
+  const keys = Object.keys(fila);
+  for (const n of nombres) {
+    const key = keys.find((k) => norm(k) === norm(n) || norm(k).includes(norm(n)));
+    if (key) return fila[key];
+  }
+  return undefined;
+}
+
+function parseGenerico(filas: Record<string, unknown>[]): MovimientoNormalizado[] {
+  const out: MovimientoNormalizado[] = [];
   for (const fila of filas) {
-    const f = fecha(col(fila, ["fecha"]));
-    const ref = col(fila, ["referencia", "ref"]);
-    const desc = col(fila, ["descripcion banco", "descripcion. banco", "descripcion", "concepto"]);
-    const ing = num(col(fila, ["ingreso", "credito", "abono"]));
-    const egr = num(col(fila, ["egreso", "debito", "cargo"]));
-    const sal = col(fila, ["saldo"]);
-
-    // Saltar filas sin fecha o de saldos iniciales
+    const f = fechaISO(col(fila, ["fecha"]));
     if (!f) continue;
-    const refStr = ref != null ? String(ref).trim() : null;
-    if (refStr === "0" && ing === 0 && egr === 0) continue;
-
+    const ref = limpiarRef(col(fila, ["referencia", "ref"]));
+    const desc = col(fila, ["descripcion", "concepto", "detalle"]);
+    const ing = num(col(fila, ["ingreso", "haber", "credito", "abono"]));
+    const egr = num(col(fila, ["egreso", "debe", "debito", "cargo"]));
+    const sal = col(fila, ["saldo"]);
+    if (ref === null && ing === 0 && egr === 0) continue;
     out.push({
       fecha: f,
-      referencia: refStr && refStr !== "0" ? refStr : null,
+      referencia: ref,
       descripcion: desc != null ? String(desc).trim() : null,
       ingreso: ing,
       egreso: egr,
       saldo: sal != null ? num(sal) : null,
     });
   }
-
   return out;
+}
+
+// --------------------------------------------------------------------------
+// Punto de entrada
+// --------------------------------------------------------------------------
+
+export function normalizarBanco(rowsCrudas: Fila[]): MovimientoNormalizado[] {
+  const filaEnc = esFormatoBNC(rowsCrudas);
+  if (filaEnc >= 0) {
+    return parseBNC(rowsCrudas, filaEnc);
+  }
+  let headerIdx = rowsCrudas.findIndex(
+    (r) => Array.isArray(r) && r.some((c) => String(c ?? "").trim())
+  );
+  if (headerIdx < 0) headerIdx = 0;
+  const headers = (rowsCrudas[headerIdx] || []).map((h) => String(h ?? "").trim());
+  const objetos: Record<string, unknown>[] = [];
+  for (let i = headerIdx + 1; i < rowsCrudas.length; i++) {
+    const r = rowsCrudas[i] || [];
+    const obj: Record<string, unknown> = {};
+    headers.forEach((h, idx) => {
+      if (h) obj[h] = r[idx];
+    });
+    objetos.push(obj);
+  }
+  return parseGenerico(objetos);
+}
+
+// Compatibilidad con el import anterior.
+export function normalizarFilas(
+  filas: Record<string, unknown>[]
+): MovimientoNormalizado[] {
+  return parseGenerico(filas);
 }

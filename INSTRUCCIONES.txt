@@ -123,16 +123,21 @@ Ajústalo ahí si cambian los códigos.
 
 
 --------------------------------------------------------------------------------
- 4. AGREGAR UN BANCO NUEVO AL PARSER DE EXCEL
+ 4. EL PARSER DE EXCEL (exports bancarios)
 --------------------------------------------------------------------------------
 
-Cada banco exporta con columnas distintas. El normalizador está en:
-     src/lib/normalizar.ts
+El normalizador está en: src/lib/normalizar.ts
 
-Busca columnas por nombre flexible (Fecha, Referencia, Ingreso, Egreso, Saldo,
-Descripción), tolerando acentos y el formato de número venezolano (9.425,24).
-Si un banco usa nombres muy distintos, agrégalos a las listas de la función
-col(...) dentro de normalizarFilas().
+Ya viene configurado para el formato REAL del BNC (probado con un export real):
+detecta las cabeceras automáticamente, salta la basura de arriba y la fila de
+"Totales", limpia las referencias y separa Debe/Haber. Toma los ingresos de la
+columna "Haber".
+
+Si en el futuro agregas otro banco con estructura distinta, hay dos parsers:
+  - parseBNC()      : por posición de columna (formato BNC).
+  - parseGenerico() : por nombre de columna (Fecha, Referencia, Ingreso/Haber...).
+La función normalizarBanco() detecta el formato solo. Para un banco nuevo con
+columnas por posición, se copia el patrón de parseBNC ajustando los índices.
 
 
 --------------------------------------------------------------------------------

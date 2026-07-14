@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { normalizarFilas } from "@/lib/normalizar";
+import { normalizarBanco } from "@/lib/normalizar";
 import { ESTADO_LABEL, type Ingreso, type MovimientoBanco } from "@/lib/tipos";
 
 interface Resultado {
@@ -64,14 +64,18 @@ export default function ConciliacionPage() {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+      // Leer como filas crudas (header:1) para poder detectar el formato del
+      // banco por posición de columna (el BNC trae cabeceras y una fila de
+      // totales que hay que saltar).
+      const filasCrudas = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+        header: 1,
         defval: "",
       });
-      const movimientos = normalizarFilas(filas);
+      const movimientos = normalizarBanco(filasCrudas);
 
       if (movimientos.length === 0) {
         throw new Error(
-          "No se encontraron movimientos con fecha en el archivo. Revisa que la primera hoja tenga las columnas Fecha, Referencia, Ingreso."
+          "No se encontraron movimientos en el archivo. Revisa que sea el export del banco con columnas de Fecha, Referencia y montos."
         );
       }
 

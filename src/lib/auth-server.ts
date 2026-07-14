@@ -41,13 +41,12 @@ export async function getSesion() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }
   );
-  const { data: perfil, error: errorPerfil } = await admin
+  const { data: perfil } = await admin
     .from("perfiles")
     .select("rol, nombre")
     .eq("id", user.id)
     .single();
 
-  
   return {
     id: user.id,
     email: user.email ?? "",
