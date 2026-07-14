@@ -1,0 +1,38 @@
+@import url("https://fonts.cdnfonts.com/css/coolvetica");
+@import url("https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tg-orange: #f27730;
+  --tg-black: #161819;
+  --tg-white: #f3f3f3;
+}
+
+html,
+body {
+  background: var(--tg-white);
+  color: var(--tg-black);
+  font-family: "Roboto", Arial, sans-serif;
+}
+
+/* Barra lateral naranja de marca en contenedores de página (modo claro) */
+.tg-page {
+  border-left: 6px solid var(--tg-orange);
+}
+
+/* Inputs consistentes */
+.tg-input {
+  @apply w-full rounded-lg border-[1.5px] border-neutral-300 bg-white px-3 py-2.5 text-[15px] outline-none;
+}
+.tg-input:focus {
+  border-color: var(--tg-orange);
+}
+.tg-label {
+  @apply mb-1.5 block text-xs font-bold uppercase tracking-wide text-neutral-600;
+}
+.tg-req {
+  color: var(--tg-orange);
+}

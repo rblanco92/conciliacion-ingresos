@@ -1,0 +1,181 @@
+================================================================================
+ TUGRUERO · SISTEMA DE CONCILIACIÓN DE INGRESOS (TALLER)
+ Instrucciones de instalación y despliegue
+================================================================================
+
+Este proyecto captura los ingresos reportados por los vendedores, los concilia
+contra el estado de cuenta del banco y genera el libro contable automáticamente.
+
+Stack: Next.js 14 + Supabase + Vercel (el mismo del CRM).
+
+
+--------------------------------------------------------------------------------
+ 1. ORDEN DE INSTALACIÓN (importante seguir la secuencia)
+--------------------------------------------------------------------------------
+
+PASO 1 — Base de datos (Supabase SQL Editor)
+   Ejecuta los scripts EN ESTE ORDEN, uno por uno:
+
+     sql/01_schema.sql        <- tablas, enums, triggers de conversión
+     sql/02_conciliacion.sql  <- motor de conciliación (funciones)
+     sql/03_rls_storage.sql   <- bucket de comprobantes (las políticas abiertas
+                                 de aquí se REEMPLAZAN por las del 04)
+     sql/04_auth_roles.sql    <- login, perfiles, roles y RLS por rol
+
+   Nota: el 03 crea el bucket "comprobantes". Si prefieres hacerlo por la UI:
+   Storage > New bucket > nombre "comprobantes" > marcar como público.
+
+
+PASO 1B — Crear el PRIMER usuario admin (importante)
+   El sistema arranca sin usuarios. Necesitas crear el primer admin a mano,
+   porque solo un admin puede crear a los demás desde la app.
+
+   a) En Supabase > Authentication > Users > "Add user":
+        - Email:    (tu correo)
+        - Password: (una clave)
+        - Marca "Auto Confirm User"
+   b) Luego, en SQL Editor, promuévelo a admin (reemplaza el correo):
+
+        update perfiles set rol = 'admin'
+        where id = (select id from auth.users where email = 'TU_CORREO_AQUI');
+
+   Con ese admin ya puedes entrar y crear al resto (vendedores y admins)
+   desde la pantalla "Usuarios" de la app.
+
+PASO 2 — Variables de entorno
+   Copia .env.local.example a .env.local y completa:
+
+     NEXT_PUBLIC_SUPABASE_URL=https://catncbxslbaycgwsjtpv.supabase.co
+     NEXT_PUBLIC_SUPABASE_ANON_KEY=<tu anon key>
+     SUPABASE_SERVICE_ROLE_KEY=<tu service role key>
+
+   La anon key y la service role key están en:
+   Supabase > Project Settings > API
+
+   IMPORTANTE: la SERVICE_ROLE_KEY es secreta. Nunca la subas a git.
+   (.gitignore ya excluye .env.local)
+
+PASO 3 — Instalar y probar en local
+     npm install
+     npm run dev
+   Abre http://localhost:3000
+
+PASO 4 — Desplegar en Vercel
+   Igual que el CRM: extrae a C:\proyectos\conciliacion-ingresos, haz git push
+   y Vercel despliega solo. En Vercel > Settings > Environment Variables carga
+   las mismas 3 variables del .env.local.
+
+
+--------------------------------------------------------------------------------
+ 2. CÓMO FUNCIONA (flujo de uso)
+--------------------------------------------------------------------------------
+
+LOGIN (todos)
+   Cada persona entra con su correo y clave. Hay dos roles:
+     - vendedor : solo ve el formulario /nuevo para reportar ingresos.
+     - admin    : ve todo (conciliación, tasas, usuarios).
+   El admin da de alta a la gente en la pantalla "Usuarios". Si alguien olvida
+   su clave, usa "Olvidé mi clave" en el login (le llega un correo).
+
+VENDEDOR  ->  /nuevo
+   Llena el formulario del pago (monto, REFERENCIA, cliente, cotización, etc.)
+   y adjunta la foto del comprobante. La referencia es el campo clave: es lo
+   que el sistema cruza contra el banco, así que debe copiarse tal cual.
+   El vendedor queda registrado automáticamente (no lo teclea).
+
+   Método de pago -> define la moneda automáticamente:
+     - En dólares ($): Efectivo ($), Binance, Zelle, Stripe, PayPal. No usan tasa.
+     - En bolívares (Bs): Efectivo (Bs), BNC. Usan la tasa BCV del día del pago.
+
+ADMIN  ->  /tasas
+   Una vez al día, carga la tasa oficial BCV. Al guardarla, todos los ingresos
+   en bolívares de esa fecha se convierten a dólares automáticamente.
+   Un ingreso en Bs SIN tasa cargada queda "pendiente de tasa" (bloqueado)
+   hasta que se cargue la tasa de su día.
+
+ADMIN  ->  /conciliacion
+   Sube el Excel del estado de cuenta. El sistema:
+     1) cruza por REFERENCIA exacta,
+     2) si no casa, intenta por MONTO + FECHA,
+     3) lo que no casa queda en la cola de EXCEPCIONES.
+   La admin solo revisa las excepciones: liga el ingreso al movimiento correcto,
+   lo aprueba, o lo rechaza.
+
+ADMIN  ->  /usuarios
+   Crea vendedores y admins, y cambia roles.
+
+
+--------------------------------------------------------------------------------
+ 3. EL LIBRO CONTABLE (la salida)
+--------------------------------------------------------------------------------
+
+La vista SQL "libro_contable" arma automáticamente el archivo en el formato que
+usa la admin hoy (Fecha, Referencia, Descripción, Ingreso, Tasa, Valor USD,
+Tipo, Partida, Subpartida, Código, Descripción), tomando solo los ingresos ya
+conciliados. Ella lo descarga en vez de transcribirlo a mano.
+
+Consulta rápida para verlo:
+     select * from libro_contable;
+
+La clasificación contable (partida / subpartida / código) se pre-llena según el
+canal de compra. El mapeo está en: src/lib/tipos.ts -> CLASIFICACION_POR_CANAL
+Ajústalo ahí si cambian los códigos.
+
+
+--------------------------------------------------------------------------------
+ 4. AGREGAR UN BANCO NUEVO AL PARSER DE EXCEL
+--------------------------------------------------------------------------------
+
+Cada banco exporta con columnas distintas. El normalizador está en:
+     src/lib/normalizar.ts
+
+Busca columnas por nombre flexible (Fecha, Referencia, Ingreso, Egreso, Saldo,
+Descripción), tolerando acentos y el formato de número venezolano (9.425,24).
+Si un banco usa nombres muy distintos, agrégalos a las listas de la función
+col(...) dentro de normalizarFilas().
+
+
+--------------------------------------------------------------------------------
+ 5. ESTADOS DE UN INGRESO
+--------------------------------------------------------------------------------
+
+   pendiente_tasa : en Bs, sin tasa BCV del día del pago (BLOQUEADO)
+   pendiente      : listo para conciliar (ya tiene monto en USD)
+   conciliado     : casó contra un movimiento del banco
+   excepcion      : no casó automáticamente, requiere revisión de la admin
+   rechazado      : la admin lo descartó (pago no válido)
+
+
+--------------------------------------------------------------------------------
+ 6. NOTA DE SEGURIDAD Y AUTH PARA PRODUCCIÓN
+--------------------------------------------------------------------------------
+
+* Las políticas RLS ya están atadas a los roles (script 04). El formulario solo
+  lo pueden usar usuarios autenticados; conciliación/tasas/usuarios solo admin.
+  La protección es doble: middleware (frontend) + RLS (base de datos).
+
+* Para que el "Olvidé mi clave" funcione en Vercel, en Supabase:
+    Authentication > URL Configuration > Site URL:
+      pon la URL de Vercel (ej. https://conciliacion-ingresos.vercel.app)
+    Y en "Redirect URLs" agrega esa misma URL con /login al final.
+
+* Correos de Supabase: en el plan gratis, el envío de correos (reseteo de clave)
+  tiene un límite bajo. Si vas a manejar muchos usuarios, configura un SMTP
+  propio en Authentication > Emails > SMTP Settings.
+
+
+================================================================================
+ Estructura del proyecto
+================================================================================
+
+   sql/                          Scripts de base de datos (ejecutar en orden)
+   src/lib/supabase.ts           Cliente Supabase (browser + server)
+   src/lib/tipos.ts              Tipos, bancos, canales, clasificación contable
+   src/lib/normalizar.ts         Parser/normalizador de exports bancarios
+   src/app/nuevo/                Formulario del vendedor
+   src/app/conciliacion/         Pantalla de conciliación + excepciones
+   src/app/tasas/                Carga de tasas BCV
+   src/app/api/conciliar/        API: cargar export + correr motor
+   src/app/api/ingresos/         API: resolver excepciones (ligar/rechazar)
+
+================================================================================
