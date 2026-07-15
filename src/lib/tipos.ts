@@ -30,6 +30,7 @@ export interface Ingreso {
   tasa_aplicada: number | null;
   monto_usd: number | null;
   estado: EstadoIngreso;
+  facturado: boolean;
   partida: string | null;
   subpartida: string | null;
   codigo_contable: string | null;
@@ -69,6 +70,7 @@ export const CANALES = [
   { value: "tienda", label: "Tienda" },
   { value: "masivos", label: "Masivos" },
   { value: "mercadolibre", label: "MercadoLibre" },
+  { value: "instagram", label: "Instagram" },
   { value: "taller", label: "Taller" },
 ] as const;
 
@@ -81,6 +83,7 @@ export const CLASIFICACION_POR_CANAL: Record<
   tienda: { partida: "TALLER", subpartida: "INGRESO REPUESTOS", codigo: "10.1.3" },
   masivos: { partida: "TALLER", subpartida: "INGRESO REPUESTOS", codigo: "10.1.3" },
   mercadolibre: { partida: "TALLER", subpartida: "INGRESO REPUESTOS", codigo: "10.1.3" },
+  instagram: { partida: "TALLER", subpartida: "INGRESO REPUESTOS", codigo: "10.1.3" },
   taller: { partida: "TALLER", subpartida: "INGRESO SERVICIOS", codigo: "10.1.4" },
 };
 
@@ -94,3 +97,15 @@ export const ESTADO_LABEL: Record<EstadoIngreso, string> = {
 
 // Métodos cuya moneda de operación es USD (no requieren tasa BCV)
 export const BANCOS_USD = ["efectivo_usd", "binance", "zelle", "stripe", "paypal"];
+
+// Etiqueta legible del canal de venta (para tablas y reportes)
+export function etiquetaCanal(valor: string): string {
+  const c = CANALES.find((x) => x.value === valor);
+  return c?.label ?? valor;
+}
+
+// Etiqueta legible del método de pago
+export function etiquetaBanco(valor: string): string {
+  const b = BANCOS.find((x) => x.value === valor);
+  return b?.label ?? valor;
+}

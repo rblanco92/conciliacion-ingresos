@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import type { Ingreso, EstadoIngreso } from "@/lib/tipos";
+import { etiquetaBanco, type Ingreso, type EstadoIngreso } from "@/lib/tipos";
 
 // Traducción de estado interno -> estado de despacho para el vendedor.
 function estadoDespacho(estado: EstadoIngreso): {
@@ -168,15 +168,3 @@ function fmt(n: number) {
   });
 }
 
-function etiquetaBanco(b: string) {
-  const map: Record<string, string> = {
-    efectivo_usd: "Efectivo ($)",
-    efectivo_bs: "Efectivo (Bs)",
-    binance: "Binance",
-    zelle: "Zelle",
-    stripe: "Stripe",
-    paypal: "PayPal",
-    bnc: "BNC",
-  };
-  return map[b] ?? b;
-}
