@@ -31,6 +31,7 @@ export interface Ingreso {
   monto_usd: number | null;
   estado: EstadoIngreso;
   facturado: boolean;
+  motivo_excepcion: string | null;
   partida: string | null;
   subpartida: string | null;
   codigo_contable: string | null;

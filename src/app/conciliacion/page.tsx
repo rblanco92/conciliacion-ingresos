@@ -226,6 +226,11 @@ function FilaExcepcion({
                 }`}{" "}
             · {ingreso.banco} · {ingreso.fecha_pago}
           </div>
+          {ingreso.motivo_excepcion && (
+            <div className="mt-2 rounded-md bg-warn/15 px-2.5 py-1.5 text-xs font-bold text-[#8a6420]">
+              ⚠ {ingreso.motivo_excepcion}
+            </div>
+          )}
         </div>
         {ingreso.comprobante_url && (
           <a
