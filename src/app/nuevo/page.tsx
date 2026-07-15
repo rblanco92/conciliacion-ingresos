@@ -31,6 +31,40 @@ export default function NuevoIngreso() {
   const [estado, setEstado] = useState<Estado>("idle");
   const [error, setError] = useState("");
 
+  // Verificación de referencia duplicada (aviso en vivo al teclear)
+  const [dup, setDup] = useState<{
+    existe: boolean;
+    es_mio?: boolean;
+    detalle?: { cotizacion: string; cliente: string; estado: string } | null;
+  } | null>(null);
+  const [verificando, setVerificando] = useState(false);
+
+  useEffect(() => {
+    const ref = referencia.trim();
+    if (ref.length < 4) {
+      setDup(null);
+      return;
+    }
+    setVerificando(true);
+    // Debounce: espera a que deje de teclear
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/verificar-referencia?ref=${encodeURIComponent(ref)}`
+        );
+        if (res.ok) setDup(await res.json());
+      } catch {
+        // silencioso: si falla la verificación, la base igual bloquea al enviar
+      } finally {
+        setVerificando(false);
+      }
+    }, 500);
+    return () => {
+      clearTimeout(t);
+      setVerificando(false);
+    };
+  }, [referencia]);
+
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (data.user) {
@@ -56,6 +90,12 @@ export default function NuevoIngreso() {
     }
     if (Number(monto) <= 0) {
       setError("El monto debe ser mayor a cero.");
+      return;
+    }
+    if (dup?.existe) {
+      setError(
+        "Esta referencia ya fue reportada. No se puede cargar dos veces el mismo pago."
+      );
       return;
     }
 
@@ -94,7 +134,19 @@ export default function NuevoIngreso() {
         subpartida: clasif?.subpartida ?? null,
         codigo_contable: clasif?.codigo ?? null,
       });
-      if (insErr) throw new Error(insErr.message);
+      if (insErr) {
+        // La base bloquea duplicados con un indice unico. Traducir el error
+        // tecnico a algo que el vendedor entienda.
+        if (
+          insErr.message.includes("uq_ingresos_referencia") ||
+          insErr.message.includes("duplicate key")
+        ) {
+          throw new Error(
+            "Esta referencia ya fue reportada. No se puede cargar dos veces el mismo pago."
+          );
+        }
+        throw new Error(insErr.message);
+      }
 
       setEstado("ok");
       limpiar();
@@ -186,14 +238,31 @@ export default function NuevoIngreso() {
             Referencia de la operación <span className="tg-req">*</span>
           </label>
           <input
-            className="w-full rounded-lg border-[1.5px] border-tg-orange bg-[#fff8f3] px-3 py-2.5 text-[15px] font-bold tracking-wide outline-none"
+            className={
+              "w-full rounded-lg border-[1.5px] px-3 py-2.5 text-[15px] font-bold tracking-wide outline-none " +
+              (dup?.existe
+                ? "border-err bg-err/5"
+                : "border-tg-orange bg-[#fff8f3]")
+            }
             placeholder="Número de referencia del pago"
             value={referencia}
             onChange={(e) => setReferencia(e.target.value)}
           />
-          <p className="mt-1 text-xs font-bold text-tg-orange">
-            ↳ Este número es el que el sistema cruza contra el banco. Cópialo tal cual.
-          </p>
+          {dup?.existe ? (
+            <p className="mt-1.5 rounded-md bg-err/10 px-2.5 py-1.5 text-xs font-bold text-err">
+              ⚠ Esta referencia ya fue reportada
+              {dup.es_mio && dup.detalle
+                ? ` por ti (${dup.detalle.cotizacion} · ${dup.detalle.cliente})`
+                : " por otro vendedor"}
+              . No se puede cargar dos veces el mismo pago.
+            </p>
+          ) : (
+            <p className="mt-1 text-xs font-bold text-tg-orange">
+              {verificando
+                ? "Verificando referencia…"
+                : "↳ Este número es el que el sistema cruza contra el banco. Cópialo tal cual."}
+            </p>
+          )}
         </div>
 
         <Field label="Nombre del cliente" req>
