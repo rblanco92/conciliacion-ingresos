@@ -23,9 +23,12 @@ declare
   v_conc      int := 0;
   v_exc       int := 0;
 begin
-  -- Recorremos los ingresos pendientes
+  -- Recorremos los ingresos que aún pueden conciliarse: los 'pendiente' y
+  -- también los 'excepcion' (una excepción suele ser solo que el movimiento
+  -- del banco todavía no había llegado; al subir un archivo que sí lo trae,
+  -- debe casar automáticamente). Los 'conciliado' y 'rechazado' no se tocan.
   for v_ingreso in
-    select * from ingresos where estado = 'pendiente'
+    select * from ingresos where estado in ('pendiente', 'excepcion')
   loop
     v_mov_id := null;
 

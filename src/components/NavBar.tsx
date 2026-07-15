@@ -36,6 +36,7 @@ export default function NavBar({ rol, nombre }: Props) {
               <>
                 <NavLink href="/ingresos">Ingresos</NavLink>
                 <NavLink href="/conciliacion">Conciliación</NavLink>
+                <NavLink href="/libro">Libro contable</NavLink>
                 <NavLink href="/tasas">Tasas BCV</NavLink>
                 <NavLink href="/usuarios">Usuarios</NavLink>
               </>

@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Rutas que solo puede ver un admin
-const RUTAS_ADMIN = ["/conciliacion", "/tasas", "/usuarios", "/ingresos"];
+const RUTAS_ADMIN = ["/conciliacion", "/tasas", "/usuarios", "/ingresos", "/libro"];
 // Rutas públicas (no requieren sesión)
 const RUTAS_PUBLICAS = ["/login", "/registro"];
 
