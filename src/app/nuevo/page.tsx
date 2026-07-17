@@ -41,7 +41,9 @@ export default function NuevoIngreso() {
 
   useEffect(() => {
     const ref = referencia.trim();
-    if (ref.length < 4) {
+    // En POS la referencia ES el numero de lote y se repite a proposito
+    // (varias cotizaciones comparten lote), asi que no se verifica duplicado.
+    if (banco === "pos" || ref.length < 4) {
       setDup(null);
       return;
     }
@@ -63,7 +65,7 @@ export default function NuevoIngreso() {
       clearTimeout(t);
       setVerificando(false);
     };
-  }, [referencia]);
+  }, [referencia, banco]);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
@@ -235,7 +237,10 @@ export default function NuevoIngreso() {
         {/* Referencia: el campo clave del cruce */}
         <div className="sm:col-span-2">
           <label className="tg-label">
-            Referencia de la operación <span className="tg-req">*</span>
+            {banco === "pos"
+              ? "Número de lote del punto de venta"
+              : "Referencia de la operación"}{" "}
+            <span className="tg-req">*</span>
           </label>
           <input
             className={
@@ -260,6 +265,8 @@ export default function NuevoIngreso() {
             <p className="mt-1 text-xs font-bold text-tg-orange">
               {verificando
                 ? "Verificando referencia…"
+                : banco === "pos"
+                ? "↳ El banco solo muestra el lote consolidado. Varias cotizaciones pueden compartir el mismo lote."
                 : "↳ Este número es el que el sistema cruza contra el banco. Cópialo tal cual."}
             </p>
           )}

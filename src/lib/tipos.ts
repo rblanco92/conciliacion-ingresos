@@ -65,6 +65,9 @@ export const BANCOS = [
   // Métodos en bolívares (Bs) — usan tasa BCV del día
   { value: "efectivo_bs", label: "Efectivo (Bs)" },
   { value: "bnc", label: "BNC" },
+  { value: "pos", label: "Punto de venta" },
+  { value: "pos", label: "Punto de venta" },
+  { value: "pos", label: "Punto de venta" },
 ] as const;
 
 export const CANALES = [
