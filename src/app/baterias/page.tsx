@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { BATERIAS, type AplicacionBateria } from "@/lib/baterias";
 import { POSITIVE } from "@/lib/positive";
 import { buscarInventario } from "@/lib/inventario";
@@ -402,6 +402,18 @@ export default function BateriasPage() {
             </span>
           </div>
 
+          {/* Preview del mensaje (como se verá en WhatsApp) */}
+          <div>
+            <div className="mb-1.5 text-xs font-extrabold uppercase tracking-wide text-neutral-500">
+              Vista previa del mensaje
+            </div>
+            <div className="max-w-md rounded-2xl rounded-tl-sm bg-[#dcf8c6] p-4 shadow-sm">
+              <pre className="whitespace-pre-wrap font-body text-sm leading-relaxed text-neutral-800">
+                <MensajePreview texto={armarMensaje()} />
+              </pre>
+            </div>
+          </div>
+
           {/* Aviso de stock */}
           <div className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-xs font-bold text-[#8a6420]">
             ⚠ Confirma el stock real antes de prometer al cliente. Las
@@ -425,6 +437,53 @@ export default function BateriasPage() {
       )}
     </div>
   );
+}
+
+// Renderiza el texto del mensaje aplicando el formato de WhatsApp:
+//   *texto* -> negrita   |   _texto_ -> cursiva
+function MensajePreview({ texto }: { texto: string }) {
+  // Procesar línea por línea, y dentro de cada línea los marcadores
+  const lineas = texto.split("\n");
+  return (
+    <>
+      {lineas.map((linea, i) => (
+        <span key={i}>
+          {renderFormato(linea)}
+          {i < lineas.length - 1 ? "\n" : ""}
+        </span>
+      ))}
+    </>
+  );
+}
+
+// Convierte los marcadores *..* y _.._ en <b> e <i>.
+function renderFormato(linea: string): ReactNode[] {
+  const nodos: ReactNode[] = [];
+  // Regex que captura *negrita* o _cursiva_
+  const regex = /(\*[^*]+\*|_[^_]+_)/g;
+  let ultimo = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(linea)) !== null) {
+    if (match.index > ultimo) {
+      nodos.push(linea.slice(ultimo, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith("*")) {
+      nodos.push(<b key={key++}>{token.slice(1, -1)}</b>);
+    } else {
+      nodos.push(
+        <i key={key++} className="text-neutral-600">
+          {token.slice(1, -1)}
+        </i>
+      );
+    }
+    ultimo = match.index + token.length;
+  }
+  if (ultimo < linea.length) {
+    nodos.push(linea.slice(ultimo));
+  }
+  return nodos;
 }
 
 // Muestra stock y precio con IVA (pequeño) debajo del código de batería.
