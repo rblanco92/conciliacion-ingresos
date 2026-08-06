@@ -20,66 +20,77 @@ function norm(s: string): string {
     .trim();
 }
 
-// Extrae "palabras clave" de un nombre de modelo Duncan para buscar en Positive.
-// Ej: "206 / 207 / 306 / 307 / 407" -> ["206","207","306","307","407"]
-//     "ALTIMA / MÁXIMA / MURANO" -> ["ALTIMA","MAXIMA","MURANO"]
-function tokensModelo(modelo: string): string[] {
-  return norm(modelo)
-    .split(/[/,]/)
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 2);
+// Quita el rango de años y paréntesis de un nombre de modelo Positive.
+// Ej: "HILUX 4CIL 99-14" -> "HILUX 4CIL"; "AVEO (TODOS)" -> "AVEO"
+function limpiarModeloPositive(s: string): string {
+  return norm(s)
+    .replace(/\d{2,4}\s*-\s*\d{2,4}/g, "") // rangos 99-14
+    .replace(/\([^)]*\)/g, "") // (TODOS), (2 BATERIAS)
+    .replace(/\b\d{2}\b(?!\w)/g, "") // años sueltos de 2 dígitos
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-// Busca en el catálogo Positive las baterías que aplican a una marca+modelo.
+// Compara un modelo Duncan (ya individual) contra un modelo Positive.
+// Coincide si uno contiene al otro como PALABRA COMPLETA (no subcadena suelta),
+// o si el nombre base coincide. Estricto para evitar falsos positivos.
+function modeloCoincide(modeloDuncan: string, modelosPositive: string): boolean {
+  const dN = norm(modeloDuncan)
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\d{2,4}\s*-\s*\d{2,4}/g, "")
+    .trim();
+  if (!dN) return false;
+
+  // Separar los modelos de Positive en items individuales (por coma)
+  const items = modelosPositive.split(",").map((x) => limpiarModeloPositive(x));
+
+  for (const item of items) {
+    if (!item) continue;
+    // Coincidencia exacta del nombre completo
+    if (item === dN) return true;
+    // El modelo Duncan aparece como secuencia de palabras completas dentro del item
+    // Ej: Duncan "HILUX 4 CIL" vs Positive "HILUX 4CIL" -> normalizar sin espacios internos
+    const dCompact = dN.replace(/\s+/g, "");
+    const iCompact = item.replace(/\s+/g, "");
+    if (dCompact === iCompact) return true;
+    // El item Positive empieza con el modelo Duncan como palabra (ej "COROLLA" vs "COROLLA CROSS" NO debe casar)
+    // Solo casar si son iguales tras compactar, o si uno es prefijo palabra-completa del otro
+    const dWords = dN.split(" ");
+    const iWords = item.split(" ");
+    // Igualdad de la primera palabra Y misma longitud de palabras clave
+    if (dWords[0] === iWords[0] && dWords.length === 1 && iWords.length === 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Busca en el catálogo Positive las baterías que aplican a un modelo Duncan individual.
 function positiveParaVehiculo(marca: string, modelo: string) {
   const marcaN = norm(marca);
-  const tokens = tokensModelo(modelo);
-  // Además de los tokens completos, extraer la "palabra base" de cada token
-  // (la primera palabra significativa), para tolerar variaciones como
-  // "HILUX 4 CIL" (Duncan) vs "HILUX 4CIL" (Positive).
-  const palabrasBase = tokens
-    .map((t) => t.split(" ")[0])
-    .filter((w) => w.length >= 3);
-
   const resultado: {
     codigo: string;
     caja: string;
     capacidad: string;
     borne: string;
-    modelosTexto: string;
   }[] = [];
   const yaAgregado = new Set<string>();
 
   for (const bat of POSITIVE) {
     for (const app of bat.aplicaciones) {
       if (norm(app.marca) !== marcaN) continue;
-      const modelosN = norm(app.modelos);
-      // Coincide si algún token completo aparece, o si alguna palabra base
-      // (nombre del modelo, ej "HILUX") aparece en la lista de Positive.
-      const coincide =
-        tokens.some((tok) => modelosN.includes(tok)) ||
-        palabrasBase.some((w) => {
-          // Buscar la palabra como término delimitado (evita falsos positivos)
-          const re = new RegExp(`(^|[^A-Z0-9])${escapeReg(w)}([^A-Z0-9]|$)`);
-          return re.test(modelosN);
-        });
-      if (coincide && !yaAgregado.has(bat.codigo)) {
+      if (modeloCoincide(modelo, app.modelos) && !yaAgregado.has(bat.codigo)) {
         resultado.push({
           codigo: bat.codigo,
           caja: bat.caja,
           capacidad: bat.capacidad,
           borne: bat.borne,
-          modelosTexto: app.modelos,
         });
         yaAgregado.add(bat.codigo);
       }
     }
   }
   return resultado;
-}
-
-function escapeReg(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export default function BateriasPage() {
