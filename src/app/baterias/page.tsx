@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { BATERIAS, type AplicacionBateria } from "@/lib/baterias";
 import { POSITIVE } from "@/lib/positive";
+import { buscarInventario } from "@/lib/inventario";
 
 const CATEGORIAS: { value: AplicacionBateria["categoria"]; label: string }[] = [
   { value: "auto", label: "Automóviles" },
@@ -120,6 +121,73 @@ export default function BateriasPage() {
     return positiveParaVehiculo(seleccion.marca, seleccion.modelo);
   }, [seleccion]);
 
+  const [copiado, setCopiado] = useState(false);
+
+  // Arma las líneas de una marca (Positive o Duncan) para el mensaje al cliente.
+  // Trae precio sin IVA desde el inventario. NO muestra disponibilidad: eso lo
+  // ve solo el vendedor en la herramienta, no el cliente.
+  function lineasMarca(
+    marcaInv: "DUNCAN" | "POSITIVE",
+    codigos: string[]
+  ): string[] {
+    const lineas: string[] = [];
+    const vistos = new Set<string>();
+    for (const cod of codigos) {
+      const inv = buscarInventario(marcaInv, cod);
+      const clave = cod;
+      if (vistos.has(clave)) continue;
+      vistos.add(clave);
+      if (inv && inv.sin_iva > 0) {
+        lineas.push(`• ${cod} — $${inv.sin_iva.toFixed(2)}`);
+      } else {
+        lineas.push(`• ${cod} — consultar precio`);
+      }
+    }
+    return lineas;
+  }
+
+  function armarMensaje(): string {
+    if (!seleccion) return "";
+    const veh = `${seleccion.marca} ${seleccion.modelo}`.trim();
+
+    // Positive primero
+    const codsPositive = positive.map((p) => p.codigo);
+    const lineasPos = lineasMarca("POSITIVE", codsPositive);
+
+    // Duncan después
+    const codsDuncan = seleccion.grupo.concat(seleccion.cp ? [seleccion.cp] : []);
+    const lineasDun = lineasMarca("DUNCAN", codsDuncan);
+
+    let msg = `🔋 *Baterías disponibles para ${veh}*\n\n`;
+
+    if (lineasPos.length) {
+      msg += `*POSITIVE*\n${lineasPos.join("\n")}\n\n`;
+    }
+    if (lineasDun.length) {
+      msg += `*DUNCAN*\n${lineasDun.join("\n")}\n\n`;
+    }
+    msg += `_Precios en USD y no incluyen IVA (16%)._\n`;
+    msg += `_Todos nuestros precios son a tasa BCV._\n`;
+    msg += `_Escríbenos para confirmar. TuGruero_`;
+    return msg;
+  }
+
+  async function copiarMensaje() {
+    const msg = armarMensaje();
+    try {
+      await navigator.clipboard.writeText(msg);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = msg;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2500);
+  }
+
   function cambiarCategoria(c: AplicacionBateria["categoria"]) {
     setCategoria(c);
     setMarca("");
@@ -223,26 +291,50 @@ export default function BateriasPage() {
                   DUNCAN
                 </span>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {seleccion.grupo.map((g, i) => (
-                  <span
-                    key={i}
-                    className="rounded-xl bg-tg-orange px-4 py-2 font-display text-lg text-tg-black"
-                  >
-                    {g}
-                  </span>
-                ))}
+              <div className="mt-3 space-y-2">
+                {seleccion.grupo.map((g, i) => {
+                  const inv = buscarInventario("DUNCAN", g);
+                  return (
+                    <div
+                      key={i}
+                      className="rounded-xl border border-tg-orange/25 bg-tg-orange/5 p-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-display text-lg text-tg-black">
+                          {g}
+                        </span>
+                        {inv && inv.sin_iva > 0 && (
+                          <span className="font-display text-lg text-tg-black">
+                            ${inv.sin_iva.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                      <PrecioStock inv={inv} />
+                    </div>
+                  );
+                })}
+                {seleccion.cp && (
+                  <div className="rounded-xl border border-tg-orange/25 bg-tg-orange/5 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-display text-base text-tg-black">
+                        {seleccion.cp}{" "}
+                        <span className="text-xs font-normal text-neutral-500">
+                          (opción CP)
+                        </span>
+                      </span>
+                      {(() => {
+                        const inv = buscarInventario("DUNCAN", seleccion.cp!);
+                        return inv && inv.sin_iva > 0 ? (
+                          <span className="font-display text-base text-tg-black">
+                            ${inv.sin_iva.toFixed(2)}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                    <PrecioStock inv={buscarInventario("DUNCAN", seleccion.cp)} />
+                  </div>
+                )}
               </div>
-              {seleccion.cp && (
-                <div className="mt-3">
-                  <span className="text-xs font-extrabold uppercase tracking-wide text-neutral-500">
-                    Opción CP:{" "}
-                  </span>
-                  <span className="font-display text-base text-tg-orange">
-                    {seleccion.cp}
-                  </span>
-                </div>
-              )}
             </div>
 
             {/* POSITIVE */}
@@ -253,28 +345,39 @@ export default function BateriasPage() {
                 </span>
               </div>
               {positive.length > 0 ? (
-                <div className="mt-3 space-y-3">
-                  {positive.map((p, i) => (
-                    <div
-                      key={i}
-                      className="rounded-xl border border-[#e11d1d]/25 bg-[#e11d1d]/5 p-3"
-                    >
-                      <div className="font-display text-lg text-[#c81717]">
-                        {p.codigo}
+                <div className="mt-3 space-y-2">
+                  {positive.map((p, i) => {
+                    const inv = buscarInventario("POSITIVE", p.codigo);
+                    return (
+                      <div
+                        key={i}
+                        className="rounded-xl border border-[#e11d1d]/25 bg-[#e11d1d]/5 p-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-display text-lg text-[#c81717]">
+                            {p.codigo}
+                          </span>
+                          {inv && inv.sin_iva > 0 && (
+                            <span className="font-display text-lg text-[#c81717]">
+                              ${inv.sin_iva.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600">
+                          <span>
+                            <b>Caja:</b> {p.caja}
+                          </span>
+                          <span>
+                            <b>Capacidad:</b> {p.capacidad}
+                          </span>
+                          <span>
+                            <b>Borne:</b> {p.borne}
+                          </span>
+                        </div>
+                        <PrecioStock inv={inv} />
                       </div>
-                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600">
-                        <span>
-                          <b>Caja:</b> {p.caja}
-                        </span>
-                        <span>
-                          <b>Capacidad:</b> {p.capacidad}
-                        </span>
-                        <span>
-                          <b>Borne:</b> {p.borne}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="mt-3 text-sm text-neutral-400">
@@ -284,6 +387,26 @@ export default function BateriasPage() {
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Botón copiar mensaje */}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={copiarMensaje}
+              className="rounded-lg bg-tg-orange px-6 py-2.5 font-bold text-tg-black"
+            >
+              {copiado ? "✓ Mensaje copiado" : "Copiar mensaje para el cliente"}
+            </button>
+            <span className="text-xs text-neutral-500">
+              Positive primero, luego Duncan. Precios sin IVA.
+            </span>
+          </div>
+
+          {/* Aviso de stock */}
+          <div className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-xs font-bold text-[#8a6420]">
+            ⚠ Confirma el stock real antes de prometer al cliente. Las
+            cantidades mostradas son del último inventario cargado y pueden haber
+            cambiado.
           </div>
 
           {seleccion.grupo.length > 1 && (
@@ -300,6 +423,33 @@ export default function BateriasPage() {
           No hay modelos registrados para esta marca.
         </p>
       )}
+    </div>
+  );
+}
+
+// Muestra stock y precio con IVA (pequeño) debajo del código de batería.
+function PrecioStock({
+  inv,
+}: {
+  inv: { sin_iva: number; con_iva: number; cantidad: number } | null;
+}) {
+  if (!inv || inv.sin_iva <= 0) {
+    return (
+      <div className="mt-1 text-xs text-neutral-400">
+        Sin precio en el inventario — consultar.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-neutral-500">
+      <span>Con IVA: ${inv.con_iva.toFixed(2)}</span>
+      <span
+        className={
+          inv.cantidad > 0 ? "font-bold text-ok" : "font-bold text-neutral-400"
+        }
+      >
+        {inv.cantidad > 0 ? `Disp: ${inv.cantidad}` : "Sin stock — consultar"}
+      </span>
     </div>
   );
 }
